@@ -61,11 +61,6 @@ static const char* frag_code =
 	"}"
 ;
 
-static void on_resize(GLFWwindow* win, int width, int height) {
-	(void)win;
-	glViewport(0, 0, width, height);
-}
-
 static GLFWwindow* start(int width, int height, const char* title) {
 	ASSERT(glfwInit() == GLFW_TRUE, "Failed to initialize GLFW");
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
@@ -79,7 +74,6 @@ static GLFWwindow* start(int width, int height, const char* title) {
 	GLFWwindow* win = glfwCreateWindow(width, height, title, NULL, NULL);
 	ASSERT(win, "Failed to create GLFW window");
 	glfwMakeContextCurrent(win);
-	glfwSetFramebufferSizeCallback(win, on_resize);
 
 	ASSERT(glewInit() == GLEW_OK, "Failed to initialize GLEW");
 
@@ -147,32 +141,59 @@ static void setup_vertex_objects(
 	glBindVertexArray(0);
 }
 
-void draw(GLFWwindow* win, GLuint shader_prog, GLuint vao) {
-	glClearColor(0.0, 0.2, 0.5, 1.0);
-	glClear(GL_COLOR_BUFFER_BIT);
+static void setup_framebuffer(GLuint* fbo, GLuint* txt) {
+	glGenFramebuffers(1, fbo);
+	glBindFramebuffer(GL_FRAMEBUFFER, *fbo);
 
-	glUseProgram(shader_prog);
-	glBindVertexArray(vao);
-	glDrawElements(GL_TRIANGLES, sizeof(indices) / sizeof(GLuint), GL_UNSIGNED_INT, 0);
+	glGenTextures(1, txt);
+	glBindTexture(GL_TEXTURE_2D, *txt);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, WIDTH, HEIGHT, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, *txt, 0);
 
-	glfwSwapBuffers(win);
+	ASSERT(glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE, "Framebuffer is incomplete");
+	
 }
 
-void export(const char* filename) {
-	uint8_t buf[WIDTH * HEIGHT * 3];
-	glReadBuffer(GL_FRONT); GL();
-	glReadPixels(0, 0, WIDTH, HEIGHT, GL_RGB, GL_UNSIGNED_BYTE, buf); GL();
-	stbi_write_png(filename, WIDTH, HEIGHT, 3, buf, WIDTH * 3);
+void draw(GLFWwindow* win, GLuint shader_prog, GLuint vao, GLuint fbo) {
+//	while (!glfwWindowShouldClose(win)) {
+		glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+		glClearColor(0.0, 0.2, 0.5, 1.0);
+		glClear(GL_COLOR_BUFFER_BIT);
+
+		glUseProgram(shader_prog);
+		glBindVertexArray(vao);
+		glDrawElements(GL_TRIANGLES, sizeof(indices) / sizeof(GLuint), GL_UNSIGNED_INT, 0);
+
+		glfwSwapBuffers(win);
+		glfwPollEvents();
+//	}
+}
+
+void export(const char* filename, int width, int height) {
+	printf("%d x %d\n", width, height);
+	uint8_t* buf = malloc(width * height * 4);
+
+	glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, buf); GL();
+	stbi_flip_vertically_on_write(1);
+	stbi_write_png(filename, width, height, 4, buf, width * 4);
+
+	free(buf);
 }
 
 int main() {
 	GLFWwindow* win = start(WIDTH, HEIGHT, TITLE);
 	GLuint shader_prog = shader_program(vert_code, frag_code);
+
 	GLuint vao, vbo, ebo;
 	setup_vertex_objects(vertices, sizeof(vertices), indices, sizeof(indices), &vao, &vbo, &ebo);
 
-	draw(win, shader_prog, vao);
-	export("out.png");
+	GLuint fbo, txt;
+	setup_framebuffer(&fbo, &txt);
+
+	draw(win, shader_prog, vao, fbo);
+	export("out.png", WIDTH, HEIGHT);
 
 	glDeleteVertexArrays(1, &vao);
 	glDeleteBuffers(1, &vbo);
