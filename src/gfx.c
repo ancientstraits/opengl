@@ -71,7 +71,7 @@ static GLFWwindow* start(int width, int height, const char* title) {
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 1);
 	glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-	glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+	// glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
 #ifdef __APPLE__
 	glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GLFW_TRUE);
 #endif
@@ -148,14 +148,17 @@ static void setup_vertex_objects(
 }
 
 void draw(GLFWwindow* win, GLuint shader_prog, GLuint vao) {
-	glClearColor(0.0, 0.2, 0.5, 1.0);
-	glClear(GL_COLOR_BUFFER_BIT);
+	while (!glfwWindowShouldClose(win)) {
+		glClearColor(0.0, 0.2, 0.5, 1.0);
+		glClear(GL_COLOR_BUFFER_BIT);
 
-	glUseProgram(shader_prog);
-	glBindVertexArray(vao);
-	glDrawElements(GL_TRIANGLES, sizeof(indices) / sizeof(GLuint), GL_UNSIGNED_INT, 0);
+		glUseProgram(shader_prog);
+		glBindVertexArray(vao);
+		glDrawElements(GL_TRIANGLES, sizeof(indices) / sizeof(GLuint), GL_UNSIGNED_INT, 0);
 
-	glfwSwapBuffers(win);
+		glfwPollEvents();
+		glfwSwapBuffers(win);
+	}
 }
 
 void export(const char* filename) {
