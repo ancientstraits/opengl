@@ -1,8 +1,12 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
+
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
 
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
 
@@ -26,15 +30,20 @@
 } while(0)
 
 static GLfloat vertices[] = {
-	0.5, 0.5, 0.0,    1.0, 0.0, 0.0,
-	0.5, -0.5, 0.0,   0.0, 1.0, 0.0,
-	-0.5, 0.5, 0.0,   0.0, 0.0, 1.0,
-	-0.5, -0.5, 0.0,  0.0, 0.0, 0.0,
+	// 0.5, 0.5, 0.0,    1.0, 0.0, 0.0,  1.0, 1.0,
+	// 0.5, -0.5, 0.0,   0.0, 1.0, 0.0,  1.0, 0.0,
+	// -0.5, 0.5, 0.0,   0.0, 0.0, 0.0,  0.0, 1.0,
+	// -0.5, -0.5, 0.0,  0.0, 0.0, 1.0,  0.0, 0.0,
+
+	1.0, 1.0, 0.0,    1.0, 0.0, 0.0,  1.0, 1.0,
+	1.0, -1.0, 0.0,   0.0, 1.0, 0.0,  1.0, 0.0,
+	-1.0, 1.0, 0.0,   0.0, 0.0, 0.0,  0.0, 1.0,
+	-1.0, -1.0, 0.0,  0.0, 0.0, 1.0,  0.0, 0.0,
 };
 
 static GLuint indices[] = {
-	0, 1, 2,
-	1, 2, 3,
+	0, 1, 2, // Triangle 1
+	1, 2, 3, // Triangle 2
 };
 
 static const char* vert_code =
@@ -42,11 +51,15 @@ static const char* vert_code =
 
 	"layout (location = 0) in vec3 pos;"
 	"layout (location = 1) in vec3 in_color;"
+	"layout (location = 2) in vec2 in_tex_coord;"
+
 	"out vec3 vert_color;"
+	"out vec2 tex_coord;"
 
 	"void main() {"
-		"gl_Position = vec4(pos.x, pos.y, pos.z, 1.0);"
+		"gl_Position = vec4(pos, 1.0);"
 		"vert_color = in_color;"
+		"tex_coord = in_tex_coord;"
 	"}"
 ;
 
@@ -54,16 +67,29 @@ static const char* frag_code =
 	"#version 330 core\n"
 
 	"out vec4 color;"
+
 	"in vec3 vert_color;"
+	"in vec2 tex_coord;"
+
+	"uniform sampler2D texture1;"
 
 	"void main() {"
-		"color = vec4(vert_color.x, vert_color.y, vert_color.z, 1.0);"
+		"color = texture(texture1, tex_coord);"
 	"}"
 ;
 
 static void on_resize(GLFWwindow* win, int width, int height) {
 	(void)win;
-	glViewport(0, 0, width, height);
+	// glViewport(0, 0, width, height);
+	glViewport(0, 0, 600, 600);
+}
+
+static void on_key(GLFWwindow* win, int key, int scancode, int action, int mode) {
+	(void)scancode;
+	(void)mode;
+
+	if (key == GLFW_KEY_Q && action == GLFW_PRESS)
+		glfwSetWindowShouldClose(win, GLFW_TRUE);
 }
 
 static GLFWwindow* start(int width, int height, const char* title) {
@@ -76,10 +102,15 @@ static GLFWwindow* start(int width, int height, const char* title) {
 	glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GLFW_TRUE);
 #endif
 
+	// GLFWmonitor* mon = glfwGetPrimaryMonitor();
+	// const GLFWvidmode* mode = glfwGetVideoMode(mon);
+	// GLFWwindow* win = glfwCreateWindow(mode->width, mode->height, title, mon, NULL);
 	GLFWwindow* win = glfwCreateWindow(width, height, title, NULL, NULL);
 	ASSERT(win, "Failed to create GLFW window");
 	glfwMakeContextCurrent(win);
+
 	glfwSetFramebufferSizeCallback(win, on_resize);
+	glfwSetKeyCallback(win, on_key);
 
 	ASSERT(glewInit() == GLEW_OK, "Failed to initialize GLEW");
 
@@ -137,20 +168,66 @@ static void setup_vertex_objects(
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, *ebo);
 	glBufferData(GL_ELEMENT_ARRAY_BUFFER, i_size, indices, GL_STATIC_DRAW);
 
-	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)0);
+	// position
+	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)0);
 	glEnableVertexAttribArray(0);
-	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)(3 * sizeof(float)));
+	// color
+	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(3 * sizeof(float)));
 	glEnableVertexAttribArray(1);
+	// texture coord
+	glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(6 * sizeof(float)));
+	glEnableVertexAttribArray(2);
 
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
 
 	glBindVertexArray(0);
 }
 
-void draw(GLFWwindow* win, GLuint shader_prog, GLuint vao) {
+static GLuint setup_texture(const char* image_path) {
+	GLuint txt;
+	glGenTextures(1, &txt);
+	glBindTexture(GL_TEXTURE_2D, txt);
+
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_MIRRORED_REPEAT);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_MIRRORED_REPEAT);
+
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+	int w, h, num_ch;
+	uint8_t* img = stbi_load(image_path, &w, &h, &num_ch, 3);
+	ASSERT(img, "Failed to load '%s'", image_path);
+
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, w, h, 0, GL_RGB, GL_UNSIGNED_BYTE, img);
+	glGenerateMipmap(GL_TEXTURE_2D);
+
+	stbi_image_free(img);
+	return txt;
+}
+
+static void export(const char* filename) {
+	uint8_t buf[WIDTH * HEIGHT * 3];
+	glReadBuffer(GL_FRONT); GL();
+	glReadPixels(0, 0, WIDTH, HEIGHT, GL_RGB, GL_UNSIGNED_BYTE, buf); GL();
+	stbi_write_png(filename, WIDTH, HEIGHT, 3, buf, WIDTH * 3);
+}
+
+int main(int argc, char** argv) {
+	if (argc < 2) {
+		fprintf(stderr, "Usage: %s [IMAGE]\n", argv[0]);
+	}
+
+	GLFWwindow* win = start(WIDTH, HEIGHT, TITLE);
+	GLuint shader_prog = shader_program(vert_code, frag_code);
+	GLuint vao, vbo, ebo;
+	setup_vertex_objects(vertices, sizeof(vertices), indices, sizeof(indices), &vao, &vbo, &ebo);
+	GLuint txt = setup_texture("res/brick.png");
+
 	while (!glfwWindowShouldClose(win)) {
 		glClearColor(0.0, 0.2, 0.5, 1.0);
 		glClear(GL_COLOR_BUFFER_BIT);
+
+		glBindTexture(GL_TEXTURE_2D, txt);
 
 		glUseProgram(shader_prog);
 		glBindVertexArray(vao);
@@ -159,23 +236,6 @@ void draw(GLFWwindow* win, GLuint shader_prog, GLuint vao) {
 		glfwPollEvents();
 		glfwSwapBuffers(win);
 	}
-}
-
-void export(const char* filename) {
-	uint8_t buf[WIDTH * HEIGHT * 3];
-	glReadBuffer(GL_FRONT); GL();
-	glReadPixels(0, 0, WIDTH, HEIGHT, GL_RGB, GL_UNSIGNED_BYTE, buf); GL();
-	stbi_write_png(filename, WIDTH, HEIGHT, 3, buf, WIDTH * 3);
-}
-
-int main() {
-	GLFWwindow* win = start(WIDTH, HEIGHT, TITLE);
-	GLuint shader_prog = shader_program(vert_code, frag_code);
-	GLuint vao, vbo, ebo;
-	setup_vertex_objects(vertices, sizeof(vertices), indices, sizeof(indices), &vao, &vbo, &ebo);
-
-	draw(win, shader_prog, vao);
-	export("out.png");
 
 	glDeleteVertexArrays(1, &vao);
 	glDeleteBuffers(1, &vbo);
@@ -185,3 +245,4 @@ int main() {
 	glfwTerminate();
 	return 0;
 }
+
